@@ -122,23 +122,21 @@ def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dic
 
 
 def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
-	"""Get accurate batch-wise inventory for a group warehouse using SLE + Serial and Batch Entry."""
+	"""Get accurate batch-wise inventory for a group warehouse (SLE + Serial and Batch Entry)."""
 
-	from frappe.query_builder import DocType, Union
+	from frappe.query_builder import DocType
 	from frappe.query_builder.functions import Sum
-	from frappe.utils import nowdate
 
 	child_warehouses = get_descendants_of("Warehouse", warehouse)
 	all_warehouses = (*tuple(child_warehouses), warehouse)
 
-	# Aliases
 	SLE = DocType("Stock Ledger Entry")
 	EI = DocType("Ecommerce Item")
 	SBB = DocType("Serial and Batch Bundle")
 	SBE = DocType("Serial and Batch Entry")
 
-	# --- PART A: Direct batch_no in Stock Ledger Entry ---
-	part_a = (
+	# Part A: Direct batch_no from SLE
+	part_a_query = (
 		frappe.qb.from_(SLE)
 		.join(EI).on(SLE.item_code == EI.erpnext_item_code)
 		.select(
@@ -160,8 +158,10 @@ def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integratio
 		.groupby(SLE.item_code, SLE.batch_no, SLE.warehouse)
 	)
 
-	# --- PART B: Batch info from Serial and Batch Entry ---
-	part_b = (
+	part_a = part_a_query.run(as_dict=True)
+
+	# Part B: Batch info from Serial and Batch Entry
+	part_b_query = (
 		frappe.qb.from_(SLE)
 		.inner_join(SBB).on(SBB.name == SLE.serial_and_batch_bundle)
 		.inner_join(SBE).on(SBE.parent == SBB.name)
@@ -186,11 +186,12 @@ def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integratio
 		.groupby(SLE.item_code, SBE.batch_no, SBE.warehouse)
 	)
 
-	# Combine both queries
-	union_query = Union(part_a, part_b, distinct=True)
-	data = union_query.run(as_dict=True)
+	part_b = part_b_query.run(as_dict=True)
 
-	# Override actual warehouse with parent group warehouse for integration
+	# Combine both datasets
+	data = part_a + part_b
+
+	# Override child warehouse with group warehouse name
 	for row in data:
 		row["warehouse"] = warehouse
 
