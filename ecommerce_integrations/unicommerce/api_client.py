@@ -198,6 +198,10 @@ class UnicommerceAPIClient:
 					"shelfCode": "DEFAULT"
 				}
 			)
+		
+		payload = {"inventoryAdjustments": inventory_adjustments}
+		endpoint = "/services/rest/v1/inventory/adjust/bulk"
+		full_url = self.base_url + endpoint
 
 		response, status = self.request(
 			endpoint="/services/rest/v1/inventory/adjust/bulk",
