@@ -120,3 +120,48 @@ def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dic
 
 	return query.run(as_dict=1)
 
+
+def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
+	"""Get batch-wise updated inventory for a group warehouse.
+
+	Returns:
+		List of dicts containing: ecom_item, item_code, integration_item_code, batch_no,
+		actual_qty, warehouse
+	"""
+
+	child_warehouse = get_descendants_of("Warehouse", warehouse)
+	all_warehouses = (*tuple(child_warehouse), warehouse)
+
+	from frappe.query_builder import DocType
+	from frappe.query_builder.functions import Sum
+	Batch = DocType("Batch")
+	Bin = DocType("Bin")
+	Ecom = DocType("Ecommerce Item")
+
+	query = (
+		frappe.qb.from_(Batch)
+		.join(Bin).on(Batch.item == Bin.item_code)
+		.join(Ecom).on(Ecom.erpnext_item_code == Bin.item_code)
+		.select(
+			Batch.item.as_("item_code"),
+			Batch.name.as_("batch_no"),
+			Sum(Bin.actual_qty).as_("actual_qty"),
+			Ecom.integration_item_code,
+			Ecom.name.as_("ecom_item")
+		)
+		.where(
+			(Bin.warehouse.isin(all_warehouses)) &
+			(Ecom.integration == integration)
+		)
+		.groupby(Batch.name)
+	)
+
+	data = query.run(as_dict=1)
+
+	# add parent group warehouse for integration sync
+	for item in data:
+		item["warehouse"] = warehouse
+
+	return data
+
+
