@@ -45,6 +45,7 @@ def force_sync(document) -> None:
 	if not method:
 		frappe.throw(frappe._("Unknown method"))
 	frappe.enqueue(method, queue="long", is_async=True, **{"force": True})
+	frappe.log_error("Sync Started","For Inventorys")
 
 
 def get_unicommerce_date(timestamp: int) -> datetime.date:
