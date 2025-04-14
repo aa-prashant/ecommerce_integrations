@@ -122,22 +122,24 @@ def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dic
 
 
 def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
-	"""Get batch-wise inventory for a group warehouse using Stock Ledger Entry."""
+	"""Get accurate batch-wise inventory for a group warehouse using SLE + Serial and Batch Entry."""
 
-	from frappe.query_builder import DocType
+	from frappe.query_builder import DocType, Union
 	from frappe.query_builder.functions import Sum
 	from frappe.utils import nowdate
-	from frappe import qb
 
 	child_warehouses = get_descendants_of("Warehouse", warehouse)
 	all_warehouses = (*tuple(child_warehouses), warehouse)
 
+	# Aliases
 	SLE = DocType("Stock Ledger Entry")
 	EI = DocType("Ecommerce Item")
+	SBB = DocType("Serial and Batch Bundle")
+	SBE = DocType("Serial and Batch Entry")
 
-	# Fetch batch-wise balance quantity per item per warehouse
-	query = (
-		qb.from_(SLE)
+	# --- PART A: Direct batch_no in Stock Ledger Entry ---
+	part_a = (
+		frappe.qb.from_(SLE)
 		.join(EI).on(SLE.item_code == EI.erpnext_item_code)
 		.select(
 			SLE.item_code,
@@ -150,16 +152,46 @@ def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integratio
 		.where(
 			(SLE.docstatus < 2) &
 			(SLE.is_cancelled == 0) &
+			(SLE.batch_no.isnotnull()) &
+			(SLE.batch_no != "") &
 			(SLE.warehouse.isin(all_warehouses)) &
 			(EI.integration == integration)
 		)
 		.groupby(SLE.item_code, SLE.batch_no, SLE.warehouse)
 	)
 
-	records = query.run(as_dict=True)
+	# --- PART B: Batch info from Serial and Batch Entry ---
+	part_b = (
+		frappe.qb.from_(SLE)
+		.inner_join(SBB).on(SBB.name == SLE.serial_and_batch_bundle)
+		.inner_join(SBE).on(SBE.parent == SBB.name)
+		.join(EI).on(SLE.item_code == EI.erpnext_item_code)
+		.select(
+			SLE.item_code,
+			SBE.batch_no,
+			SBE.warehouse,
+			EI.integration_item_code,
+			EI.name.as_("ecom_item"),
+			Sum(SBE.qty).as_("actual_qty")
+		)
+		.where(
+			(SLE.docstatus < 2) &
+			(SLE.is_cancelled == 0) &
+			(SLE.has_batch_no == 1) &
+			(SBE.batch_no.isnotnull()) &
+			(SBE.batch_no != "") &
+			(SBE.warehouse.isin(all_warehouses)) &
+			(EI.integration == integration)
+		)
+		.groupby(SLE.item_code, SBE.batch_no, SBE.warehouse)
+	)
 
-	# Overwrite child warehouse with group warehouse for integration purposes
-	for row in records:
+	# Combine both queries
+	union_query = Union(part_a, part_b, distinct=True)
+	data = union_query.run(as_dict=True)
+
+	# Override actual warehouse with parent group warehouse for integration
+	for row in data:
 		row["warehouse"] = warehouse
 
-	return records
+	return data
