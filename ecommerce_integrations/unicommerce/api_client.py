@@ -170,25 +170,32 @@ class UnicommerceAPIClient:
 		if status:
 			return response
 
-	def bulk_inventory_update(self, facility_code: str, inventory_map: dict[str, int]):
-		"""Bulk update inventory on unicommerce using SKU and qty.
+	def bulk_inventory_update(self, facility_code: str, inventory_data: list[dict]):
+		"""Bulk update inventory on unicommerce using SKU and qty (batch-aware).
 
-		The qty should be "total" quantity.
-		ref: https://documentation.unicommerce.com/docs/adjust-inventory-bulk.html
+		Each row in inventory_data must include:
+		- itemSKU
+		- quantity
+		- batchCode
 		"""
 
 		extra_headers = {"Facility": facility_code}
 
 		inventory_adjustments = []
-		for sku, qty in inventory_map.items():
+		for row in inventory_data:
+			qty = cint(row.get("actual_qty") or 0)
+			if qty < 0:
+				qty = 0
+
 			inventory_adjustments.append(
 				{
-					"itemSKU": sku,
+					"itemSKU": row["integration_item_code"],
 					"quantity": qty,
-					"shelfCode": "DEFAULT",  # XXX
+					"batchCode": row.get("batch_no") or "NO-BATCH",
 					"inventoryType": "GOOD_INVENTORY",
 					"adjustmentType": "REPLACE",
 					"facilityCode": facility_code,
+					"shelfCode": "DEFAULT"
 				}
 			)
 
@@ -200,84 +207,25 @@ class UnicommerceAPIClient:
 
 		if not status:
 			return response, status
-		else:
-			# parse result by item
-			try:
-				item_wise_response = response["inventoryAdjustmentResponses"]
-				item_wise_status = {
-					item["facilityInventoryAdjustment"]["itemSKU"]: item["successful"]
-					for item in item_wise_response
-				}
-				if False in item_wise_status.values():
-					create_unicommerce_log(
-						status="Failure",
-						response_data=response,
-						message="Inventory sync failed for some items",
-						make_new=True,
-					)
-				return item_wise_status, status
-			except Exception:
-				return response, False
 
-	def create_sales_invoice(
-		self, so_code: str, so_item_codes: list[str], facility_code: str
-	) -> JsonDict | None:
-		body = {"saleOrderCode": so_code, "saleOrderItemCodes": so_item_codes}
-		extra_headers = {"Facility": facility_code}
+		try:
+			item_wise_response = response.get("inventoryAdjustmentResponses", [])
+			item_wise_status = {
+				item["facilityInventoryAdjustment"]["itemSKU"]: item["successful"]
+				for item in item_wise_response
+			}
+			if False in item_wise_status.values():
+				create_unicommerce_log(
+					status="Failure",
+					response_data=response,
+					message="Inventory sync failed for some items",
+					make_new=True,
+				)
+			return item_wise_status, status
+		except Exception as e:
+			frappe.log_error(title="Unicommerce Sync Exception", message=frappe.get_traceback())
+			return response, False
 
-		response, status = self.request(
-			endpoint="/services/rest/v1/invoice/createInvoiceBySaleOrderCode",
-			body=body,
-			headers=extra_headers,
-		)
-		return response
-
-	def create_invoice_by_shipping_code(self, shipping_package_code: str, facility_code: str):
-		body = {"shippingPackageCode": shipping_package_code}
-		response, status = self.request(
-			endpoint="/services/rest/v1/oms/shippingPackage/createInvoice",
-			body=body,
-			headers={"Facility": facility_code},
-		)
-
-		return response
-
-	def create_invoice_and_assign_shipper(self, shipping_package_code: str, facility_code: str):
-		"""
-		 Invoice and label generation API for self-shipped orders.
-
-		ref: https://documentation.unicommerce.com/docs/pos-shippingpackage-createinvoice-allocateshippingprovider.html
-		"""
-		body = {
-			"shippingPackageCode": shipping_package_code,
-		}
-		response, status = self.request(
-			endpoint="/services/rest/v1/oms/shippingPackage/createInvoiceAndAllocateShippingProvider",
-			body=body,
-			headers={"Facility": facility_code},
-		)
-
-		return response
-
-	def create_invoice_and_label_by_shipping_code(
-		self, shipping_package_code: str, facility_code: str, generate_label: bool = True
-	):
-		"""
-		 Invoice and label generation API for marketplace orders.
-
-		ref: https://documentation.unicommerce.com/docs/create_invoiceandlabel_by_shippingpackagecode.html
-		"""
-		body = {
-			"shippingPackageCode": shipping_package_code,
-			"generateUniwareShippingLabel": generate_label,
-		}
-		response, status = self.request(
-			endpoint="/services/rest/v1/oms/shippingPackage/createInvoiceAndGenerateLabel",
-			body=body,
-			headers={"Facility": facility_code},
-		)
-
-		return response
 
 	def get_sales_invoice(
 		self, shipping_package_code: str, facility_code: str, is_return: bool = False

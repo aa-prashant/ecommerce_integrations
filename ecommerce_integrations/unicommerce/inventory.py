@@ -7,6 +7,7 @@ from ecommerce_integrations.controllers.inventory import (
 	get_inventory_levels,
 	get_inventory_levels_of_group_warehouse,
 	update_inventory_sync_status,
+	get_batchwise_inventory_levels,
 )
 from ecommerce_integrations.controllers.scheduling import need_to_run
 from ecommerce_integrations.unicommerce.api_client import UnicommerceAPIClient
@@ -46,35 +47,25 @@ def update_inventory_on_unicommerce(client=None, force=False):
 	inventory_synced_on = now()
 
 	for warehouse in warehouses:
-		is_group_warehouse = cint(frappe.db.get_value("Warehouse", warehouse, "is_group"))
-
-		if is_group_warehouse:
-			erpnext_inventory = get_inventory_levels_of_group_warehouse(
-				warehouse=warehouse, integration=MODULE_NAME
-			)
-		else:
-			erpnext_inventory = get_inventory_levels(warehouses=(warehouse,), integration=MODULE_NAME)
-
-		if not erpnext_inventory:
+		batchwise_data = get_batchwise_inventory_levels(warehouse, MODULE_NAME)
+		if not batchwise_data:
 			continue
 
-		erpnext_inventory = erpnext_inventory[:MAX_INVENTORY_UPDATE_IN_REQUEST]
-
-		# TODO: consider reserved qty on both platforms.
-		inventory_map = {d.integration_item_code: cint(d.actual_qty) for d in erpnext_inventory}
+		inventory_data = batchwise_data[:MAX_INVENTORY_UPDATE_IN_REQUEST]
 		facility_code = wh_to_facility_map[warehouse]
 
 		response, status = client.bulk_inventory_update(
-			facility_code=facility_code, inventory_map=inventory_map
+			facility_code=facility_code,
+			inventory_data=inventory_data
 		)
 
 		if status:
-			# update success_map
-			sku_to_ecom_item_map = {d.integration_item_code: d.ecom_item for d in erpnext_inventory}
-			for sku, status in response.items():
-				ecom_item = sku_to_ecom_item_map[sku]
-				# Any one warehouse sync failure should be considered failure
-				success_map[ecom_item] = success_map[ecom_item] and status
+			for row in inventory_data:
+				ecom_item = row["ecom_item"]
+				sku = row["integration_item_code"]
+				success = response.get(sku, False)
+				success_map[ecom_item] = success_map[ecom_item] and success
+
 
 	_update_inventory_sync_status(success_map, inventory_synced_on)
 

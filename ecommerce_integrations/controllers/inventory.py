@@ -91,3 +91,32 @@ def update_inventory_sync_status(ecommerce_item, time=None):
 		time = now()
 
 	frappe.db.set_value("Ecommerce Item", ecommerce_item, "inventory_synced_on", time)
+
+def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dict]:
+	from frappe.query_builder import DocType
+	from frappe.query_builder.functions import Sum
+
+	Batch = DocType("Batch")
+	Bin = DocType("Bin")
+	Ecom = DocType("Ecommerce Item")
+
+	query = (
+		frappe.qb.from_(Batch)
+		.join(Bin).on(Batch.item == Bin.item_code)
+		.join(Ecom).on(Ecom.erpnext_item_code == Bin.item_code)
+		.select(
+			Batch.item.as_("item_code"),
+			Batch.name.as_("batch_no"),
+			Sum(Bin.actual_qty).as_("actual_qty"),
+			Ecom.integration_item_code,
+			Ecom.name.as_("ecom_item"),
+		)
+		.where(
+			(Bin.warehouse == warehouse) &
+			(Ecom.integration == integration)
+		)
+		.groupby(Batch.name)
+	)
+
+	return query.run(as_dict=1)
+
