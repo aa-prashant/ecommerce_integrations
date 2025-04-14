@@ -199,6 +199,15 @@ class UnicommerceAPIClient:
 				}
 			)
 
+		frappe.log_error(
+			title="Unicommerce Inventory Sync Request",
+			message=frappe.as_json({
+				"facility": facility_code,
+				"headers": extra_headers,
+				"inventoryAdjustments": inventory_adjustments
+			})
+		)
+
 		response, status = self.request(
 			endpoint="/services/rest/v1/inventory/adjust/bulk",
 			headers=extra_headers,
