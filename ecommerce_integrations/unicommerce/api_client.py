@@ -199,30 +199,32 @@ class UnicommerceAPIClient:
 				}
 			)
 
-		payload = {"inventoryAdjustments": inventory_adjustments}
-		endpoint = "/services/rest/v1/inventory/adjust/bulk"
-		full_url = self.base_url + endpoint
-
-		# ✅ Construct the cURL
-		curl_parts = [
-			f"curl -X POST '{full_url}'",
-		] + [
-			f"-H '{key}: {value}'" for key, value in headers.items()
-		] + [
-			f"-d '{json.dumps(payload)}'"
-		]
-		curl_command = " \\\n  ".join(curl_parts)
-
-		# ✅ Log it
-		frappe.log_error(
-			title="Unicommerce Inventory Sync cURL",
-			message=curl_command
-		)
-
 		response, status = self.request(
 			endpoint="/services/rest/v1/inventory/adjust/bulk",
 			headers=extra_headers,
 			body={"inventoryAdjustments": inventory_adjustments},
+		)
+
+		# ✅ Construct cURL (after request is made)
+		full_headers = self._auth_headers.copy()
+		full_headers.update(extra_headers)
+
+		curl_parts = [
+			f"curl -X POST '{full_url}'"
+		]
+		for key, value in full_headers.items():
+			curl_parts.append(f"-H '{key}: {value}'")
+		curl_parts.append(f"-d '{json.dumps(payload)}'")
+
+		curl_command = " \\\n  ".join(curl_parts)
+
+		# ✅ Log both request and response
+		frappe.log_error(
+			title="Unicommerce Inventory Sync - cURL and Response",
+			message=json.dumps({
+				"cURL": curl_command,
+				"response": response
+			}, indent=2)
 		)
 
 		if not status:
