@@ -122,46 +122,44 @@ def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dic
 
 
 def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
-	"""Get batch-wise updated inventory for a group warehouse.
-
-	Returns:
-		List of dicts containing: ecom_item, item_code, integration_item_code, batch_no,
-		actual_qty, warehouse
-	"""
-
-	child_warehouse = get_descendants_of("Warehouse", warehouse)
-	all_warehouses = (*tuple(child_warehouse), warehouse)
+	"""Get batch-wise inventory for a group warehouse using Stock Ledger Entry."""
 
 	from frappe.query_builder import DocType
 	from frappe.query_builder.functions import Sum
-	Batch = DocType("Batch")
-	Bin = DocType("Bin")
-	Ecom = DocType("Ecommerce Item")
+	from frappe.utils import nowdate
+	from frappe import qb
 
+	child_warehouses = get_descendants_of("Warehouse", warehouse)
+	all_warehouses = (*tuple(child_warehouses), warehouse)
+
+	SLE = DocType("Stock Ledger Entry")
+	EI = DocType("Ecommerce Item")
+
+	# Fetch batch-wise balance quantity per item per warehouse
 	query = (
-		frappe.qb.from_(Batch)
-		.join(Bin).on(Batch.item == Bin.item_code)
-		.join(Ecom).on(Ecom.erpnext_item_code == Bin.item_code)
+		qb.from_(SLE)
+		.join(EI).on(SLE.item_code == EI.erpnext_item_code)
 		.select(
-			Batch.item.as_("item_code"),
-			Batch.name.as_("batch_no"),
-			Sum(Bin.actual_qty).as_("actual_qty"),
-			Ecom.integration_item_code,
-			Ecom.name.as_("ecom_item")
+			SLE.item_code,
+			SLE.batch_no,
+			SLE.warehouse,
+			EI.integration_item_code,
+			EI.name.as_("ecom_item"),
+			Sum(SLE.actual_qty).as_("actual_qty")
 		)
 		.where(
-			(Bin.warehouse.isin(all_warehouses)) &
-			(Ecom.integration == integration)
+			(SLE.docstatus < 2) &
+			(SLE.is_cancelled == 0) &
+			(SLE.warehouse.isin(all_warehouses)) &
+			(EI.integration == integration)
 		)
-		.groupby(Batch.name)
+		.groupby(SLE.item_code, SLE.batch_no, SLE.warehouse)
 	)
 
-	data = query.run(as_dict=1)
+	records = query.run(as_dict=True)
 
-	# add parent group warehouse for integration sync
-	for item in data:
-		item["warehouse"] = warehouse
+	# Overwrite child warehouse with group warehouse for integration purposes
+	for row in records:
+		row["warehouse"] = warehouse
 
-	return data
-
-
+	return records
