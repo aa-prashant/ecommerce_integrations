@@ -121,7 +121,7 @@ def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dic
 	return query.run(as_dict=1)
 
 
-ddef get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
+def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
 	"""Get accurate batch-wise inventory for a group warehouse (SLE + Serial and Batch Entry) with mfg_date from Batch."""
 
 	from frappe.query_builder import DocType
