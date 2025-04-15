@@ -276,7 +276,6 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 
 	for barcode in item.barcodes:
 		if not item_json.get("scanIdentifier"):
-			# Set first barcode as scan identifier
 			item_json["scanIdentifier"] = barcode.barcode
 		if barcode.barcode_type == "EAN":
 			item_json["ean"] = barcode.barcode
@@ -284,13 +283,38 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 			item_json["upc"] = barcode.barcode
 
 	item_json["categoryCode"] = frappe.db.get_value("Item Group", item.item_group, PRODUCT_CATEGORY_FIELD)
-	# append site prefix to image url
 	item_json["imageUrl"] = get_url(item.image)
 	item_json["maxRetailPrice"] = item.standard_rate
 	item_json["description"] = frappe.utils.strip_html_tags(item.description)
 	item_json["costPrice"] = item.valuation_rate
 
+	# ✅ Add bundle structure if item is a bundle (virtual item, maintain_stock=0)
+	if not item.maintain_stock:
+		components = frappe.get_all(
+			"Product Bundle Item",
+			filters={"parent": item_code},
+			fields=["item_code", "qty"]
+		)
+
+		if components:
+			item_json["type"] = "BUNDLE"
+			item_json["taxCalculationType"] = "PRICE_OF_BUNDLE_SKU"
+
+			component_items = []
+			for component in components:
+				component_price = frappe.db.get_value("Item", component.item_code, "standard_rate") or 0
+
+				component_items.append({
+					"itemSku": component.item_code,
+					"quantity": component.qty,
+					"price": component_price
+				})
+
+			item_json["componentItemTypes"] = component_items
+
+
 	return item_json
+
 
 
 def _handle_ecommerce_item(item_code: ItemCode) -> None:
