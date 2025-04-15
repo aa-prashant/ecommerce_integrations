@@ -121,8 +121,8 @@ def get_batchwise_inventory_levels(warehouse: str, integration: str) -> list[dic
 	return query.run(as_dict=1)
 
 
-def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
-	"""Get accurate batch-wise inventory for a group warehouse (SLE + Serial and Batch Entry)."""
+ddef get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integration: str) -> list[dict]:
+	"""Get accurate batch-wise inventory for a group warehouse (SLE + Serial and Batch Entry) with mfg_date from Batch."""
 
 	from frappe.query_builder import DocType
 	from frappe.query_builder.functions import Sum
@@ -135,7 +135,7 @@ def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integratio
 	SBB = DocType("Serial and Batch Bundle")
 	SBE = DocType("Serial and Batch Entry")
 
-	# Part A: Direct batch_no from SLE
+	# --- Part A: Direct batch_no from SLE ---
 	part_a_query = (
 		frappe.qb.from_(SLE)
 		.join(EI).on(SLE.item_code == EI.erpnext_item_code)
@@ -160,7 +160,7 @@ def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integratio
 
 	part_a = part_a_query.run(as_dict=True)
 
-	# Part B: Batch info from Serial and Batch Entry
+	# --- Part B: Batch info from Serial and Batch Entry ---
 	part_b_query = (
 		frappe.qb.from_(SLE)
 		.inner_join(SBB).on(SBB.name == SLE.serial_and_batch_bundle)
@@ -191,8 +191,9 @@ def get_batchwise_inventory_levels_of_group_warehouse(warehouse: str, integratio
 	# Combine both datasets
 	data = part_a + part_b
 
-	# Override child warehouse with group warehouse name
+	# Inject mfg_date from Batch doctype
 	for row in data:
-		row["warehouse"] = warehouse
+		row["warehouse"] = warehouse  # override child warehouse
+		row["mfg_date"] = frappe.db.get_value("Batch", row["batch_no"], "manufacturing_date")
 
 	return data

@@ -171,70 +171,61 @@ class UnicommerceAPIClient:
 		if status:
 			return response
 
-	def bulk_inventory_update(self, facility_code: str, inventory_data: list[dict]):
-		"""Bulk update inventory on unicommerce using SKU and qty (batch-aware).
+	def convert_to_epoch(date_str):
+		try:
+			return int(get_datetime(date_str).timestamp() * 1000)
+		except Exception:
+			return int(get_datetime(nowdate()).timestamp() * 1000)  # fallback to today
 
-		Each row in inventory_data must include:
-		- itemSKU
-		- quantity
-		- batchCode
-		"""
+	def bulk_inventory_update(self, facility_code: str, inventory_data: list[dict]):
+		"""Send batch-wise inventory with batchDetails only (no batchCode) as per Unicommerce's latest spec."""
 
 		extra_headers = {"Facility": facility_code}
-
 		inventory_adjustments = []
+
 		for row in inventory_data:
 			qty = cint(row.get("actual_qty") or 0)
 			if qty < 0:
 				qty = 0
 
-			inventory_adjustments.append(
-				{
-					"itemSKU": row["integration_item_code"],
-					"quantity": qty,
-					"batchCode": row.get("batch_no") or "NO-BATCH",
-					"inventoryType": "GOOD_INVENTORY",
-					"adjustmentType": "REPLACE",
-					"facilityCode": facility_code,
-					"shelfCode": "DEFAULT"
-				}
-			)
-		
-		payload = {"inventoryAdjustments": inventory_adjustments}
-		endpoint = "/services/rest/v1/inventory/adjust/bulk"
-		full_url = self.base_url + endpoint
+			batch_no = row.get("batch_no") or "NO-BATCH"
+			mfg_date = row.get("mfg_date") or nowdate()
 
+			adjustment = {
+				"itemSKU": row["integration_item_code"],
+				"quantity": qty,
+				"shelfCode": "DEFAULT",
+				"inventoryType": "GOOD_INVENTORY",
+				"adjustmentType": "REPLACE",
+				"facilityCode": facility_code,
+				"batchDetails": {
+					"vendorCode": batch_no,
+					"mfd": convert_to_epoch(mfg_date)
+				}
+			}
+
+			inventory_adjustments.append(adjustment)
+
+		payload = {"inventoryAdjustments": inventory_adjustments}
+
+		# 🔁 Make the actual API request
 		response, status = self.request(
 			endpoint="/services/rest/v1/inventory/adjust/bulk",
 			headers=extra_headers,
-			body={"inventoryAdjustments": inventory_adjustments},
+			body=payload
 		)
 
-		# ✅ Construct cURL (after request is made)
-		full_headers = self._auth_headers.copy()
-		full_headers.update(extra_headers)
-
-		curl_parts = [
-			f"curl -X POST '{full_url}'"
-		]
-		for key, value in full_headers.items():
-			curl_parts.append(f"-H '{key}: {value}'")
-		curl_parts.append(f"-d '{json.dumps(payload)}'")
-
-		curl_command = " \\\n  ".join(curl_parts)
-
-		# ✅ Log both request and response
+		# ✅ Log request + response after the call
 		frappe.log_error(
-			title="Unicommerce Inventory Sync - cURL and Response",
+			title="Unicommerce Inventory Sync - Request and Response",
 			message=json.dumps({
-				"cURL": curl_command,
+				"facility": facility_code,
+				"payload": payload,
 				"response": response
 			}, indent=2)
 		)
 
-		if not status:
-			return response, status
-
+		# ✅ Post-process and return
 		try:
 			item_wise_response = response.get("inventoryAdjustmentResponses", [])
 			item_wise_status = {
@@ -249,9 +240,10 @@ class UnicommerceAPIClient:
 					make_new=True,
 				)
 			return item_wise_status, status
-		except Exception as e:
-			frappe.log_error(title="Unicommerce Sync Exception", message=frappe.get_traceback())
+		except Exception:
+			frappe.log_error("Unicommerce Inventory Sync - Parse Error", frappe.get_traceback())
 			return response, False
+
 
 
 	def get_sales_invoice(
