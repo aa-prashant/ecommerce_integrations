@@ -171,7 +171,7 @@ class UnicommerceAPIClient:
 		if status:
 			return response
 
-	def convert_to_epoch(date_str):
+	def convert_to_epoch(self, date_str):
 		try:
 			return int(get_datetime(date_str).timestamp() * 1000)
 		except Exception:
@@ -200,7 +200,7 @@ class UnicommerceAPIClient:
 				"facilityCode": facility_code,
 				"batchDetails": {
 					"vendorCode": batch_no,
-					"mfd": convert_to_epoch(mfg_date)
+					"mfd": self.convert_to_epoch(mfg_date)
 				}
 			}
 
