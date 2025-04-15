@@ -199,7 +199,7 @@ class UnicommerceAPIClient:
 				"adjustmentType": "REPLACE",
 				"facilityCode": facility_code,
 				"batchDetails": {
-					"vendorCode": batch_no,
+					"vendorBatchNumber": batch_no,
 					"mfd": self.convert_to_epoch(mfg_date)
 				}
 			}
