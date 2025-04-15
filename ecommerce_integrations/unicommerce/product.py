@@ -289,7 +289,7 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 	item_json["costPrice"] = item.valuation_rate
 
 	# ✅ Add bundle structure if item is a bundle (virtual item, maintain_stock=0)
-	if not item.maintain_stock:
+	if not item.is_stock_item:
 		components = frappe.get_all(
 			"Product Bundle Item",
 			filters={"parent": item_code},
