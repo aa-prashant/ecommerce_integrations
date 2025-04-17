@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import frappe
+import json
 from erpnext.stock.doctype.batch.batch import Batch
 from frappe import _
 from frappe.utils import cint, getdate
@@ -222,3 +223,73 @@ def prevent_grn_cancel(doc, method=None):
 	msg += _("and remove stock from Unicommerce.")
 
 	frappe.throw(msg, title="GRN Stock Entry can not be cancelled")
+
+
+def sync_unicommerce_grn_status():
+	"""Sync GRN status from Unicommerce for internal transfer Delivery Notes."""
+
+	client = UnicommerceAPIClient()
+
+	# Fetch Delivery Notes to process
+	delivery_notes = frappe.get_all(
+		"Delivery Note",
+		filters={
+			"docstatus": 1,
+			"custom_is_internal_transfer": 1,
+			"custom_reference_no": ["!=", ""],
+		},
+		fields=["name", "custom_reference_no"]
+	)
+
+	if not delivery_notes:
+		frappe.log_error(title="Unicommerce GRN Sync", message="No delivery notes found for syncing.")
+		return
+
+	for dn in delivery_notes:
+		try:
+			# Prepare request payload
+			payload = {
+				"purchaseOrderCode": dn.custom_reference_no
+			}
+
+			# Send API request
+			response, status = client.request(
+				endpoint="/services/rest/v1/purchase/inflowReceipt/getInflowReceipts",
+				method="POST",
+				headers={"facility": "kiwikisan"},
+				body=payload
+			)
+
+			# Log the request and response
+			frappe.log_error(
+				title="Unicommerce GRN API Call",
+				message=json.dumps({
+					"delivery_note": dn.name,
+					"request_payload": payload,
+					"response": response,
+					"status": status
+				}, indent=2)
+			)
+
+			if status and response.get("successful") and response.get("inflowReceiptCodes"):
+				# GRN exists
+				frappe.db.set_value(
+					"Delivery Note",
+					dn.name,
+					"custom_unicommerce_grn_status",
+					"GRN Created"  # or "GRN Completed" based on your logic
+				)
+
+				frappe.db.commit()
+
+				frappe.log_error(
+					title="Unicommerce GRN Updated",
+					message=f"Delivery Note {dn.name} updated with GRN Created status."
+				)
+
+		except Exception:
+			frappe.log_error(
+				title="Unicommerce GRN Sync Error",
+				message=frappe.get_traceback()
+			)
+
