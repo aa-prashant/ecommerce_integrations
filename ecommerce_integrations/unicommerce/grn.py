@@ -272,7 +272,7 @@ def sync_unicommerce_internal_receipts():
 			grn_codes = response.get("inflowReceiptCodes", [])
 
 			# 3. Insert any missing GRNs into child table
-			existing_grns = {row.grn_code for row in dn_doc.get("unicommerce_grns")}
+			existing_grns = {row.grn_code for row in dn_doc.get("unicommerce_grn")}
 			new_grns = set(grn_codes) - existing_grns
 
 			for grn_code in new_grns:
