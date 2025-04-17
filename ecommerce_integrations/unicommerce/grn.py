@@ -7,6 +7,7 @@ from frappe import _
 from frappe.utils import cint, getdate
 from frappe.utils.csvutils import UnicodeWriter
 from frappe.utils.file_manager import save_file
+from frappe.utils import now
 
 from ecommerce_integrations.unicommerce.api_client import UnicommerceAPIClient
 from ecommerce_integrations.unicommerce.constants import (
@@ -225,34 +226,35 @@ def prevent_grn_cancel(doc, method=None):
 	frappe.throw(msg, title="GRN Stock Entry can not be cancelled")
 
 
-def sync_unicommerce_grn_status():
-	"""Sync GRN status from Unicommerce for internal transfer Delivery Notes."""
+
+
+def sync_unicommerce_internal_receipts():
+	"""Background Job: Sync Unicommerce GRNs and create Internal Purchase Receipts"""
 
 	client = UnicommerceAPIClient()
 
-	# Fetch Delivery Notes to process
+	# 1. Fetch all eligible Delivery Notes
 	delivery_notes = frappe.get_all(
 		"Delivery Note",
 		filters={
 			"docstatus": 1,
 			"custom_is_internal_transfer": 1,
 			"custom_reference_no": ["!=", ""],
+			"custom_unicommerce_grn_status": ["not in", ["GRN Completed"]]
 		},
 		fields=["name", "custom_reference_no"]
 	)
 
 	if not delivery_notes:
-		frappe.log_error(title="Unicommerce GRN Sync", message="No delivery notes found for syncing.")
+		frappe.log_error("Unicommerce GRN Sync", "No delivery notes found for syncing.")
 		return
 
 	for dn in delivery_notes:
-		try:
-			# Prepare request payload
-			payload = {
-				"purchaseOrderCode": dn.custom_reference_no
-			}
+		dn_doc = frappe.get_doc("Delivery Note", dn.name)
 
-			# Send API request
+		try:
+			# 2. Fetch GRNs for this PO
+			payload = {"purchaseOrderCode": dn.custom_reference_no}
 			response, status = client.request(
 				endpoint="/services/rest/v1/purchase/inflowReceipt/getInflowReceipts",
 				method="POST",
@@ -260,36 +262,126 @@ def sync_unicommerce_grn_status():
 				body=payload
 			)
 
-			# Log the request and response
-			frappe.log_error(
-				title="Unicommerce GRN API Call",
-				message=json.dumps({
-					"delivery_note": dn.name,
-					"request_payload": payload,
-					"response": response,
-					"status": status
-				}, indent=2)
+			if not status or not response.get("successful"):
+				frappe.log_error(
+					title="Unicommerce GRN Fetch Failed",
+					message=f"Delivery Note: {dn.name}, Error: {response}"
+				)
+				continue
+
+			grn_codes = response.get("inflowReceiptCodes", [])
+
+			# 3. Insert any missing GRNs into child table
+			existing_grns = {row.grn_code for row in dn_doc.get("unicommerce_grns")}
+			new_grns = set(grn_codes) - existing_grns
+
+			for grn_code in new_grns:
+				dn_doc.append("unicommerce_grns", {
+					"grn_code": grn_code,
+					"status": "Pending",
+					"last_checked_on": now()
+				})
+
+			dn_doc.save(ignore_permissions=True)
+
+			# 4. Process each GRN
+			for grn_row in dn_doc.get("unicommerce_grns"):
+				if grn_row.status not in ["Pending", "Error"]:
+					continue
+
+				try:
+					# Fetch GRN Details
+					payload = {"inflowReceiptCode": grn_row.grn_code}
+					grn_response, grn_status = client.request(
+						endpoint="/services/rest/v1/purchase/inflowReceipt/getInflowReceipt",
+						method="POST",
+						headers={"facility": "kiwikisan"},
+						body=payload
+					)
+
+					if not grn_status or not grn_response.get("successful"):
+						grn_row.status = "Error"
+						grn_row.last_checked_on = now()
+						continue
+
+					inflow_receipt = grn_response.get("inflowReceipt", {})
+					if inflow_receipt.get("statusCode") != "QC_COMPLETE":
+						grn_row.status = "Pending"
+						grn_row.last_checked_on = now()
+						continue
+
+					# Create Internal Purchase Receipt (Draft)
+					pr_doc = frappe.get_doc(
+						erpnext.stock.doctype.delivery_note.delivery_note.make_inter_company_transaction(
+							"Delivery Note", dn.name
+						)
+					)
+
+					# Update PR fields from GRN
+					pr_doc.supplier_invoice_no = inflow_receipt.get("vendorInvoiceNumber")
+					pr_doc.supplier_invoice_date = inflow_receipt.get("vendorInvoiceDate")
+
+					# Map items by SKU
+					inflow_items = inflow_receipt.get("inflowReceiptItems", [])
+
+					sku_to_batch = {}
+					for item in inflow_items:
+						if item.get("batchDTO") and item["batchDTO"].get("batchFieldsDTO"):
+							vendor_batch_no = item["batchDTO"]["batchFieldsDTO"].get("vendorBatchNumber")
+							sku_to_batch[item["itemSKU"]] = vendor_batch_no
+
+					for pr_item in pr_doc.items:
+						batch_no = sku_to_batch.get(pr_item.item_code)
+						if batch_no:
+							pr_item.batch_no = batch_no
+
+					# Save and submit PR as DRAFT
+					pr_doc.save(ignore_permissions=True)
+					grn_row.purchase_receipt = pr_doc.name
+					grn_row.status = "PR Created"
+					grn_row.last_checked_on = now()
+
+					frappe.log_error(
+						title="Unicommerce GRN → PR Created",
+						message=f"Delivery Note: {dn.name}, GRN: {grn_row.grn_code}, PR: {pr_doc.name}"
+					)
+
+				except Exception:
+					grn_row.status = "Error"
+					grn_row.last_checked_on = now()
+					frappe.log_error(
+						title="Unicommerce GRN Processing Error",
+						message=frappe.get_traceback()
+					)
+
+			# Save updates in DN
+			dn_doc.save(ignore_permissions=True)
+
+			# 5. After processing, check if PO is fully GRN'ed
+			payload = {"purchaseOrderCode": dn.custom_reference_no}
+			po_response, po_status = client.request(
+				endpoint="/services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails",
+				method="POST",
+				headers={"facility": "kiwikisan"},
+				body=payload
 			)
 
-			if status and response.get("successful") and response.get("inflowReceiptCodes"):
-				# GRN exists
-				frappe.db.set_value(
-					"Delivery Note",
-					dn.name,
-					"custom_unicommerce_grn_status",
-					"GRN Created"  # or "GRN Completed" based on your logic
-				)
+			if po_status and po_response.get("successful"):
+				purchase_order = po_response
+				all_items = purchase_order.get("purchaseOrderItems", [])
+				pending_qty = sum(item.get("pendingQuantity", 0) for item in all_items)
 
-				frappe.db.commit()
+				if pending_qty == 0:
+					dn_doc.custom_unicommerce_grn_status = "GRN Completed"
+					dn_doc.save(ignore_permissions=True)
 
-				frappe.log_error(
-					title="Unicommerce GRN Updated",
-					message=f"Delivery Note {dn.name} updated with GRN Created status."
-				)
+					frappe.log_error(
+						title="Unicommerce PO Fully GRNed",
+						message=f"Delivery Note {dn.name} marked GRN Completed"
+					)
 
 		except Exception:
 			frappe.log_error(
-				title="Unicommerce GRN Sync Error",
+				title="Unicommerce Full Sync Error",
 				message=frappe.get_traceback()
-			)
-
+		 )
