@@ -276,7 +276,7 @@ def sync_unicommerce_internal_receipts():
 			new_grns = set(grn_codes) - existing_grns
 
 			for grn_code in new_grns:
-				dn_doc.append("unicommerce_grns", {
+				dn_doc.append("custom_unicommerce_grn", {
 					"grn_code": grn_code,
 					"status": "Pending",
 					"last_checked_on": now()
@@ -285,7 +285,7 @@ def sync_unicommerce_internal_receipts():
 			dn_doc.save(ignore_permissions=True)
 
 			# 4. Process each GRN
-			for grn_row in dn_doc.get("unicommerce_grns"):
+			for grn_row in dn_doc.get("custom_unicommerce_grn"):
 				if grn_row.status not in ["Pending", "Error"]:
 					continue
 
