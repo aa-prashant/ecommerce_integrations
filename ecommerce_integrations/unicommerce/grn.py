@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import frappe
 import json
 from erpnext.stock.doctype.batch.batch import Batch
+from erpnext.stock.doctype.delivery_note.delivery_note import make_inter_company_transaction
 from frappe import _
 from frappe.utils import cint, getdate
 from frappe.utils.csvutils import UnicodeWriter
