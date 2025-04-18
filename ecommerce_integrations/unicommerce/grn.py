@@ -305,7 +305,16 @@ def sync_unicommerce_internal_receipts():
 						continue
 
 					inflow_receipt = grn_response.get("inflowReceipt", {})
+
 					if inflow_receipt.get("statusCode") != "QC_COMPLETE":
+						grn_row.status = "Pending"
+						grn_row.last_checked_on = now()
+						continue
+
+					# additionally check all items are QC_COMPLETE
+					inflow_items = inflow_receipt.get("inflowReceiptItems") or []
+					
+					if not inflow_items or any(item.get("status") != "QC_COMPLETE" for item in inflow_items):
 						grn_row.status = "Pending"
 						grn_row.last_checked_on = now()
 						continue
