@@ -228,10 +228,14 @@ def prevent_grn_cancel(doc, method=None):
 
 
 
+
+from frappe.utils import now
+
 def sync_unicommerce_internal_receipts():
 	"""Background Job: Sync Unicommerce GRNs and create Internal Purchase Receipts"""
 
 	client = UnicommerceAPIClient()
+	child_table_fieldname = "custom_unicommerce_grn"
 
 	# 1. Fetch all eligible Delivery Notes
 	delivery_notes = frappe.get_all(
@@ -253,6 +257,12 @@ def sync_unicommerce_internal_receipts():
 		dn_doc = frappe.get_doc("Delivery Note", dn.name)
 
 		try:
+			# Log which DN is being processed
+			frappe.log_error(
+				title="Processing Delivery Note",
+				message=f"Delivery Note: {dn.name}, Reference No: {dn.custom_reference_no}"
+			)
+
 			# 2. Fetch GRNs for this PO
 			payload = {"purchaseOrderCode": dn.custom_reference_no}
 			response, status = client.request(
@@ -271,12 +281,22 @@ def sync_unicommerce_internal_receipts():
 
 			grn_codes = response.get("inflowReceiptCodes", [])
 
+			# Log fetched GRNs
+			frappe.log_error(
+				title="Fetched GRNs",
+				message=json.dumps({
+					"delivery_note": dn.name,
+					"reference_no": dn.custom_reference_no,
+					"grn_codes": grn_codes
+				}, indent=2)
+			)
+
 			# 3. Insert any missing GRNs into child table
-			existing_grns = {row.grn_code for row in dn_doc.get("custom_unicommerce_grn")}
+			existing_grns = {row.grn_code for row in (dn_doc.get(child_table_fieldname) or [])}
 			new_grns = set(grn_codes) - existing_grns
 
 			for grn_code in new_grns:
-				dn_doc.append("custom_unicommerce_grn", {
+				dn_doc.append(child_table_fieldname, {
 					"grn_code": grn_code,
 					"status": "Pending",
 					"last_checked_on": now()
@@ -285,7 +305,7 @@ def sync_unicommerce_internal_receipts():
 			dn_doc.save(ignore_permissions=True)
 
 			# 4. Process each GRN
-			for grn_row in dn_doc.get("custom_unicommerce_grn"):
+			for grn_row in (dn_doc.get(child_table_fieldname) or []):
 				if grn_row.status not in ["Pending", "Error"]:
 					continue
 
@@ -306,18 +326,46 @@ def sync_unicommerce_internal_receipts():
 
 					inflow_receipt = grn_response.get("inflowReceipt", {})
 
+					# Log fetched inflowReceipt
+					frappe.log_error(
+						title="Fetched InflowReceipt",
+						message=json.dumps({
+							"delivery_note": dn.name,
+							"grn_code": grn_row.grn_code,
+							"inflow_receipt": inflow_receipt
+						}, indent=2)
+					)
+
+					# Check Header Status
 					if inflow_receipt.get("statusCode") != "QC_COMPLETE":
 						grn_row.status = "Pending"
 						grn_row.last_checked_on = now()
 						continue
 
-					# additionally check all items are QC_COMPLETE
 					inflow_items = inflow_receipt.get("inflowReceiptItems") or []
-					
+					# Check Items Status
 					if not inflow_items or any(item.get("status") != "QC_COMPLETE" for item in inflow_items):
 						grn_row.status = "Pending"
 						grn_row.last_checked_on = now()
 						continue
+
+					# Log Decision
+					frappe.log_error(
+						title="GRN Processing Decision",
+						message=json.dumps({
+							"delivery_note": dn.name,
+							"grn_code": grn_row.grn_code,
+							"header_status": inflow_receipt.get("statusCode"),
+							"items_status": [
+								{
+									"item_sku": item.get("itemSKU"),
+									"item_status": item.get("status")
+								}
+								for item in inflow_items
+							],
+							"final_decision": "Proceed"
+						}, indent=2)
+					)
 
 					# Create Internal Purchase Receipt (Draft)
 					pr_doc = frappe.get_doc(
@@ -330,9 +378,7 @@ def sync_unicommerce_internal_receipts():
 					pr_doc.supplier_invoice_no = inflow_receipt.get("vendorInvoiceNumber")
 					pr_doc.supplier_invoice_date = inflow_receipt.get("vendorInvoiceDate")
 
-					# Map items by SKU
-					inflow_items = inflow_receipt.get("inflowReceiptItems", [])
-
+					# Map batches by SKU
 					sku_to_batch = {}
 					for item in inflow_items:
 						if item.get("batchDTO") and item["batchDTO"].get("batchFieldsDTO"):
@@ -344,8 +390,10 @@ def sync_unicommerce_internal_receipts():
 						if batch_no:
 							pr_item.batch_no = batch_no
 
-					# Save and submit PR as DRAFT
+					# Save PR as Draft
 					pr_doc.save(ignore_permissions=True)
+
+					# Update GRN Tracking Row
 					grn_row.purchase_receipt = pr_doc.name
 					grn_row.status = "PR Created"
 					grn_row.last_checked_on = now()
@@ -363,10 +411,10 @@ def sync_unicommerce_internal_receipts():
 						message=frappe.get_traceback()
 					)
 
-			# Save updates in DN
+			# Save Delivery Note after processing all GRNs
 			dn_doc.save(ignore_permissions=True)
 
-			# 5. After processing, check if PO is fully GRN'ed
+			# 5. After processing GRNs, check if PO fully GRNed
 			payload = {"purchaseOrderCode": dn.custom_reference_no}
 			po_response, po_status = client.request(
 				endpoint="/services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails",
