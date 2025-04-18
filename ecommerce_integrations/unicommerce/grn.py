@@ -381,6 +381,7 @@ def sync_unicommerce_internal_receipts():
 							break
 
 					if accepted_warehouse:
+						pr_doc.set_warehouse = accepted_warehouse
 						for item in pr_doc.items:
 							item.warehouse = accepted_warehouse
 					else:
