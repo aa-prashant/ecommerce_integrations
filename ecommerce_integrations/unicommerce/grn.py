@@ -370,7 +370,7 @@ def sync_unicommerce_internal_receipts():
 
 					# Create Internal Purchase Receipt (Draft)
 					pr_doc = frappe.get_doc(
-						erpnext.stock.doctype.delivery_note.delivery_note.make_inter_company_transaction(
+						make_inter_company_transaction(
 							"Delivery Note", dn.name
 						)
 					)
