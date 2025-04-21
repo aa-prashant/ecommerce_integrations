@@ -249,7 +249,20 @@ def upload_items_to_unicommerce(
 		sku = item_data.get("skuCode")
 
 		item_exists = bool(client.get_unicommerce_item(sku, log_error=False))
-		_, status = client.create_update_item(item_data, update=item_exists)
+		response, status = client.create_update_item(item_data, update=item_exists)
+
+		# ✅ After getting the response, log it
+		if item_data.get("type") == "BUNDLE":
+			try:
+				frappe.log_error(
+					title="Unicommerce Bundle Upload Response",
+					message=json.dumps(response, indent=2) if isinstance(response, dict) else str(response)
+				)
+			except Exception:
+				pass
+
+
+
 
 		if status:
 			_handle_ecommerce_item(item_code)
@@ -311,7 +324,15 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 				})
 
 			item_json["componentItemTypes"] = component_items
-
+	
+	if item_json.get("type") == "BUNDLE":
+	try:
+		frappe.log_error(
+			title="Unicommerce Bundle Payload",
+			message=json.dumps(item_json, indent=2)
+		)
+	except Exception:
+		pass
 
 	return item_json
 
