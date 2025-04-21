@@ -324,17 +324,27 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 				})
 
 			item_json["componentItemTypes"] = component_items
-	
+
+	# 🔥 Full Logging Block for BUNDLE
 	if item_json.get("type") == "BUNDLE":
 		try:
+			log_content = {
+				"Item Meta": {
+					"Item Code": item.item_code,
+					"Item Group": item.item_group,
+					"Maintain Stock": item.is_stock_item,
+				},
+				"Prepared Bundle Payload": item_json
+			}
 			frappe.log_error(
-				title="Unicommerce Bundle Payload",
-				message=json.dumps(item_json, indent=2)
+				title=f"Unicommerce Bundle Upload Payload - {item.item_code}",
+				message=json.dumps(log_content, indent=2)
 			)
 		except Exception:
 			pass
 
 	return item_json
+
 
 
 
