@@ -298,7 +298,7 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 
 		if components:
 			item_json["type"] = "BUNDLE"
-			item_json["taxCalculationType"] = "PRICE_OF_BUNDLE_SKU"
+			item_json["taxCalculationType"] = "PRICE_OF_COMPONENET_SKU"
 
 			component_items = []
 			for component in components:
