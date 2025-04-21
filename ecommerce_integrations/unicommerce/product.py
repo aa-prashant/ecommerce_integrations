@@ -275,41 +275,18 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 	"""Build Unicommerce item JSON using an ERPNext item"""
 	item = frappe.get_doc("Item", item_code)
 
-	# 🔥 1. Log starting point
-	try:
-		frappe.log_error(
-			title="Start Building Item for Unicommerce",
-			message=json.dumps({
-				"Item Code": item.item_code,
-				"Item Name": item.item_name,
-				"Item Group": item.item_group,
-				"Maintain Stock": item.is_stock_item
-			}, indent=2)
-		)
-	except Exception:
-		pass
-
 	item_json = {}
 
-	# 🔥 2. Map fields and log each field
 	for erpnext_field, uni_field in ERPNEXT_TO_UNI_ITEM_MAPPING.items():
 		value = item.get(erpnext_field)
 		if value is not None:
 			item_json[uni_field] = value
-			try:
-				frappe.log_error(
-					title=f"Field Mapping - {erpnext_field} → {uni_field}",
-					message=f"Value: {value}"
-				)
-			except Exception:
-				pass
 
 	item_json["enabled"] = not bool(item.get("disabled"))
 
 	if item_json.get("description"):
 		item_json["description"] = to_markdown(item_json["description"]) or item_json["description"]
 
-	# 🔥 3. Handle barcodes
 	for barcode in item.barcodes:
 		if not item_json.get("scanIdentifier"):
 			item_json["scanIdentifier"] = barcode.barcode
@@ -318,45 +295,27 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 		elif barcode.barcode_type == "UPC-A":
 			item_json["upc"] = barcode.barcode
 
-	try:
-		frappe.log_error(
-			title="Barcodes Assigned",
-			message=json.dumps([
-				{"barcode": b.barcode, "type": b.barcode_type}
-				for b in item.barcodes
-			], indent=2)
-		)
-	except Exception:
-		pass
-
 	item_json["categoryCode"] = frappe.db.get_value("Item Group", item.item_group, PRODUCT_CATEGORY_FIELD)
 	item_json["imageUrl"] = get_url(item.image)
 	item_json["maxRetailPrice"] = item.standard_rate
 	item_json["description"] = frappe.utils.strip_html_tags(item.description)
 	item_json["costPrice"] = item.valuation_rate
 
-	# 🔥 4. Bundle Handling
+	# ✅ Handle Bundle Items
+	bundle_components = []
 	if not item.is_stock_item:
-		components = frappe.get_all(
+		bundle_components = frappe.get_all(
 			"Product Bundle Item",
 			filters={"parent": item_code},
 			fields=["item_code", "qty"]
-		)
+		) or []  # 🛠 Safe fallback to empty list if None
 
-		try:
-			frappe.log_error(
-				title="Bundle Components Found",
-				message=json.dumps(components, indent=2)
-			)
-		except Exception:
-			pass
-
-		if components:
+		if bundle_components:
 			item_json["type"] = "BUNDLE"
 			item_json["taxCalculationType"] = "PRICE_OF_COMPONENET_SKU"
 
 			component_items = []
-			for component in components:
+			for component in bundle_components:
 				component_price = frappe.db.get_value("Item", component.item_code, "standard_rate") or 0
 
 				component_items.append({
@@ -367,16 +326,30 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 
 			item_json["componentItemTypes"] = component_items
 
-	# 🔥 5. Final Payload Log
+	# ✅ Now Log EVERYTHING in one log
+	log_content = {
+		"Item Basic Info": {
+			"Item Code": item.item_code,
+			"Item Name": item.item_name,
+			"Item Group": item.item_group,
+			"Maintain Stock": item.is_stock_item,
+		},
+		"Prepared Payload": item_json,
+	}
+
+	if bundle_components:
+		log_content["Bundle Components"] = bundle_components
+
 	try:
 		frappe.log_error(
-			title="Final Unicommerce Payload for Item",
-			message=json.dumps(item_json, indent=2)
+			title=f"Build Ecommerce Item Log - {item.item_code}",
+			message=json.dumps(log_content, indent=2)
 		)
 	except Exception:
 		pass
 
 	return item_json
+
 
 
 
