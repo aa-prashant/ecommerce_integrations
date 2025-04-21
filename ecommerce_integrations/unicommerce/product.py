@@ -326,13 +326,13 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 			item_json["componentItemTypes"] = component_items
 	
 	if item_json.get("type") == "BUNDLE":
-	try:
-		frappe.log_error(
-			title="Unicommerce Bundle Payload",
-			message=json.dumps(item_json, indent=2)
-		)
-	except Exception:
-		pass
+		try:
+			frappe.log_error(
+				title="Unicommerce Bundle Payload",
+				message=json.dumps(item_json, indent=2)
+			)
+		except Exception:
+			pass
 
 	return item_json
 
