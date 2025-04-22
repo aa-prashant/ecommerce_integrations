@@ -48,6 +48,7 @@ class UnicommerceAPIClient:
 		files: JsonDict | None = None,
 		log_error=True,
 	) -> tuple[JsonDict, bool]:
+
 		if headers is None:
 			headers = {}
 
@@ -55,35 +56,59 @@ class UnicommerceAPIClient:
 
 		url = self.base_url + endpoint
 
+		# ✅ Log outgoing request
+		try:
+			outgoing_request = {
+				"url": url,
+				"method": method,
+				"headers": headers,
+				"params": params,
+				"body": body
+			}
+			frappe.log_error(
+				title=f"Unicommerce Outgoing Request - {endpoint}",
+				message=json.dumps(outgoing_request, indent=2)
+			)
+		except Exception:
+			pass
+
 		try:
 			response = requests.request(
 				url=url, method=method, headers=headers, json=body, params=params, files=files
 			)
-			# unicommerce gives useful info in response text, show it in error logs
-			response.reason = cstr(response.reason) + cstr(response.text)
-			response.raise_for_status()
-		except Exception:
+		except Exception as e:
 			if log_error:
-				create_unicommerce_log(status="Error", make_new=True)
+				create_unicommerce_log(status="Error", make_new=True, message=str(e))
 			return None, False
 
-		if method == "GET" and "application/json" not in response.headers.get("content-type"):
-			return response.content, True
+		# ✅ Always try to parse response safely
+		try:
+			resp_json = response.json()
+			status = resp_json.get("successful", True)
+		except Exception:
+			resp_json = {"raw_text": response.text}
+			status = False
 
-		data = frappe._dict(response.json())
-		status = data.successful if data.successful is not None else True
-
-		if not status:
-			req = response.request
-			url = f"URL: {req.url}"
-			body = f"body:  {req.body.decode('utf-8')}"
-			request_data = "\n\n".join([url, body])
-			message = ", ".join(cstr(error["message"]) for error in data.errors)
-			create_unicommerce_log(
-				status="Error", response_data=data, request_data=request_data, message=message, make_new=True
+		# ✅ Log incoming response
+		try:
+			frappe.log_error(
+				title=f"Unicommerce Response - {endpoint}",
+				message=json.dumps({
+					"status_code": response.status_code,
+					"response_body": resp_json
+				}, indent=2)
 			)
+		except Exception:
+			pass
 
-		return data, status
+		# ✅ Raise error if necessary
+		if not response.ok:
+			if log_error:
+				create_unicommerce_log(status="Error", response_data=resp_json, make_new=True)
+			return resp_json, False
+
+		return resp_json, status
+
 
 	def get_unicommerce_item(self, sku: str, log_error=True) -> JsonDict | None:
 		"""Get Unicommerce item data for specified SKU code.
@@ -97,16 +122,23 @@ class UnicommerceAPIClient:
 			return item
 
 	def create_update_item(self, item_dict: JsonDict, update=False) -> tuple[JsonDict, bool]:
-		"""Create/update item on unicommerce.
-
-		ref: https://documentation.unicommerce.com/docs/createoredit-itemtype.html
-		"""
-
+		"""Create/update item on unicommerce."""
 		endpoint = "/services/rest/v1/catalog/itemType/createOrEdit"
 		if update:
-			# Edit has separate endpoint even though docs suggest otherwise
 			endpoint = "/services/rest/v1/catalog/itemType/edit"
+		
+		# ✅ Log payload separately for bundle
+		if item_dict.get("type") == "BUNDLE":
+			try:
+				frappe.log_error(
+					title=f"Bundle Upload Payload - {item_dict.get('skuCode')}",
+					message=json.dumps(item_dict, indent=2)
+				)
+			except Exception:ß
+				pass
+
 		return self.request(endpoint=endpoint, body={"itemType": item_dict})
+
 
 	def get_sales_order(self, order_code: str) -> JsonDict | None:
 		"""Get details for a sales order.

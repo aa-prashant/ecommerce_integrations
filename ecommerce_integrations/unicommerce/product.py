@@ -231,14 +231,7 @@ def _get_new_items() -> list[ItemCode]:
 
 	return [item[0] for item in new_items]
 
-
-def upload_items_to_unicommerce(
-	item_codes: list[ItemCode], client: UnicommerceAPIClient = None
-) -> list[ItemCode]:
-	"""Upload multiple items to Unicommerce.
-
-	Return Successfully synced item codes.
-	"""
+def upload_items_to_unicommerce(item_codes: list[ItemCode], client: UnicommerceAPIClient = None) -> list[ItemCode]:
 	if not client:
 		client = UnicommerceAPIClient()
 
@@ -248,21 +241,27 @@ def upload_items_to_unicommerce(
 		item_data = _build_unicommerce_item(item_code)
 		sku = item_data.get("skuCode")
 
+		# Before uploading, log the payload
+		try:
+			frappe.log_error(
+				title=f"Outgoing Item Upload - {item_code}",
+				message=json.dumps(item_data, indent=2)
+			)
+		except Exception:
+			pass
+
 		item_exists = bool(client.get_unicommerce_item(sku, log_error=False))
+
 		response, status = client.create_update_item(item_data, update=item_exists)
 
-		# ✅ After getting the response, log it
-		if item_data.get("type") == "BUNDLE":
-			try:
-				frappe.log_error(
-					title="Unicommerce Bundle Upload Response",
-					message=json.dumps(response, indent=2) if isinstance(response, dict) else str(response)
-				)
-			except Exception:
-				pass
-
-
-
+		# After uploading, log the response
+		try:
+			frappe.log_error(
+				title=f"Unicommerce Upload Response - {item_code}",
+				message=json.dumps(response, indent=2) if isinstance(response, dict) else str(response)
+			)
+		except Exception:
+			pass
 
 		if status:
 			_handle_ecommerce_item(item_code)
@@ -272,7 +271,6 @@ def upload_items_to_unicommerce(
 
 
 def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
-	"""Build Unicommerce item JSON using an ERPNext item"""
 	item = frappe.get_doc("Item", item_code)
 
 	item_json = {}
@@ -301,14 +299,13 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 	item_json["description"] = frappe.utils.strip_html_tags(item.description)
 	item_json["costPrice"] = item.valuation_rate
 
-	# ✅ Handle Bundle Items
 	bundle_components = []
 	if not item.is_stock_item:
 		bundle_components = frappe.get_all(
 			"Product Bundle Item",
 			filters={"parent": item_code},
 			fields=["item_code", "qty"]
-		) or []  # 🛠 Safe fallback to empty list if None
+		) or []
 
 		if bundle_components:
 			item_json["type"] = "BUNDLE"
@@ -317,7 +314,6 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 			component_items = []
 			for component in bundle_components:
 				component_price = frappe.db.get_value("Item", component.item_code, "standard_rate") or 0
-
 				component_items.append({
 					"itemSku": component.item_code,
 					"quantity": component.qty,
@@ -326,23 +322,21 @@ def _build_unicommerce_item(item_code: ItemCode) -> JsonDict:
 
 			item_json["componentItemTypes"] = component_items
 
-	# ✅ Now Log EVERYTHING in one log
+	# Final log for the item
 	log_content = {
-		"Item Basic Info": {
+		"Item Info": {
 			"Item Code": item.item_code,
 			"Item Name": item.item_name,
 			"Item Group": item.item_group,
 			"Maintain Stock": item.is_stock_item,
 		},
-		"Prepared Payload": item_json,
+		"Payload Prepared": item_json,
+		"Bundle Components (if any)": bundle_components
 	}
-
-	if bundle_components:
-		log_content["Bundle Components"] = bundle_components
 
 	try:
 		frappe.log_error(
-			title=f"Build Ecommerce Item Log - {item.item_code}",
+			title=f"Unicommerce Item Build - {item.item_code}",
 			message=json.dumps(log_content, indent=2)
 		)
 	except Exception:
