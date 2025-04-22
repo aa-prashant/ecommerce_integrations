@@ -134,7 +134,7 @@ class UnicommerceAPIClient:
 					title=f"Bundle Upload Payload - {item_dict.get('skuCode')}",
 					message=json.dumps(item_dict, indent=2)
 				)
-			except Exception:ß
+			except Exception:
 				pass
 
 		return self.request(endpoint=endpoint, body={"itemType": item_dict})
