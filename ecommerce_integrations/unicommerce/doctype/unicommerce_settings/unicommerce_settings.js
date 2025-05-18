@@ -47,6 +47,8 @@ frappe.ui.form.on("Unicommerce Settings", {
 			},
 		});
 
+
+
 		frm.fields_dict["warehouse_mapping"].grid.get_field(
 			"erpnext_warehouse"
 		).get_query = function (doc) {

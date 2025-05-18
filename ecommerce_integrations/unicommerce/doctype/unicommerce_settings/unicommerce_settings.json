@@ -35,6 +35,10 @@
   "enable_inventory_sync",
   "inventory_sync_frequency",
   "warehouse_mapping",
+  "purchase_order_sync_setting_section",
+  "sync_purchase_order",
+  "default_material_request_series",
+  "default_source_warehouse",
   "grn_settings_section",
   "use_stock_entry_for_grn",
   "vendor_code",
@@ -262,12 +266,35 @@
    "fieldname": "delivery_note",
    "fieldtype": "Check",
    "label": "Import Delivery Notes from Unicommerce on Shipment"
+  },
+  {
+   "description": "This is for internal transfer. Unicommerce Purchase Order are considered as Material Request in ERPNext.",
+   "fieldname": "purchase_order_sync_setting_section",
+   "fieldtype": "Section Break",
+   "label": "Purchase Order Sync Setting"
+  },
+  {
+   "default": "0",
+   "fieldname": "sync_purchase_order",
+   "fieldtype": "Check",
+   "label": "Sync Purchase Order"
+  },
+  {
+   "fieldname": "default_material_request_series",
+   "fieldtype": "Select",
+   "label": "Default Material Request Series"
+  },
+  {
+   "fieldname": "default_source_warehouse",
+   "fieldtype": "Link",
+   "label": "Default Source Warehouse",
+   "options": "Warehouse"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2023-05-02 14:04:26.684256",
+ "modified": "2025-05-19 00:25:56.540365",
  "modified_by": "Administrator",
  "module": "unicommerce",
  "name": "Unicommerce Settings",
@@ -284,6 +311,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],
