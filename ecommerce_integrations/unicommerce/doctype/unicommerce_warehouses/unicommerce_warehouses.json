@@ -62,14 +62,13 @@
   {
    "fieldname": "last_po_sync_at",
    "fieldtype": "Datetime",
-   "label": "Last PO Sync at",
-   "read_only": 1
+   "label": "Last PO Sync at"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-05-18 20:56:59.360479",
+ "modified": "2025-05-19 01:39:31.407022",
  "modified_by": "Administrator",
  "module": "unicommerce",
  "name": "Unicommerce Warehouses",
