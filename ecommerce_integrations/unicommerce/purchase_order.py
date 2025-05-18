@@ -17,16 +17,15 @@ def sync_purchase_orders():
 		last_sync = mapping.get("last_po_sync_at") or "2024-01-01 00:00:00"
 
 		# ⏰ Get datetime window
-		start = get_datetime(last_sync)
-		end = now_datetime()
+		start = get_datetime(last_sync).isoformat() + "Z"
+		end = now_datetime().isoformat() + "Z"
 
 		# 🔍 Search Purchase Orders
 		po_codes = client.search_purchase_orders(
 			facility_code=facility_code,
-			start=start,
-			end=end
+			start_date=start,
+			end_date=end
 		)
-
 
 		if not po_codes:
 			continue
@@ -47,7 +46,7 @@ def sync_purchase_orders():
 			"Unicommerce Warehouses",
 			mapping.name,
 			"last_po_sync_at",
-			end
+			now_datetime()
 		)
 
 
@@ -75,4 +74,9 @@ def create_material_request(po_data, target_warehouse, facility_code):
 
 	mr.insert(ignore_permissions=True)
 
-	mr.add_comment("Comment", f"📦 PO Code: {po_data.get('code')}, Vendor: {po_data.get('vendorName')}, Facility: {facility_code}, Created By: {po_data.get('createdBy')}")
+	# Add metadata as comment
+	mr.add_comment(
+		"Comment",
+		f"📦 PO Code: {po_data.get('code')}, Vendor: {po_data.get('vendorName')}, "
+		f"Facility: {facility_code}, Created By: {po_data.get('createdBy')}"
+	)
