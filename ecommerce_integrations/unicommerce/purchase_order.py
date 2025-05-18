@@ -23,9 +23,10 @@ def sync_purchase_orders():
 		# 🔍 Search Purchase Orders
 		po_codes = client.search_purchase_orders(
 			facility_code=facility_code,
-			start_datetime=start,
-			end_datetime=end
+			start=start,
+			end=end
 		)
+
 
 		if not po_codes:
 			continue
