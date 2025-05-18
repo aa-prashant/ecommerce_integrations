@@ -390,6 +390,51 @@ class UnicommerceAPIClient:
 		)
 		if status:
 			return response
+	
+	def search_purchase_orders(
+		self,
+		updated_since: int = 1440,  # default 24 hrs
+		facility_code: str = None,
+		status: str = "COMPLETE"
+	) -> list[str] | None:
+		"""Search approved POs from Unicommerce by facility.
+
+		Ref: https://documentation.unicommerce.com/docs/purchaseorder_search.html
+		"""
+		headers = {"Facility": facility_code}
+		body = {
+			"status": status,
+			"updatedSinceInMinutes": updated_since
+		}
+
+		response, status = self.request(
+			endpoint="/services/rest/v1/oms/purchaseOrder/search",
+			headers=headers,
+			body=body
+		)
+
+		if status and "purchaseOrderCodes" in response:
+			return response["purchaseOrderCodes"]
+		
+
+	def get_purchase_order_details(self, po_code: str, facility_code: str) -> JsonDict | None:
+		"""Get full PO details.
+
+		Ref: https://documentation.unicommerce.com/docs/get_purchase_order_details.html
+		"""
+		headers = {"Facility": facility_code}
+		body = {"code": po_code}
+
+		response, status = self.request(
+			endpoint="/services/rest/v1/oms/purchaseOrder/get",
+			headers=headers,
+			body=body
+		)
+
+		if status:
+			return response
+
+
 
 	def search_shipping_packages(
 		self,
