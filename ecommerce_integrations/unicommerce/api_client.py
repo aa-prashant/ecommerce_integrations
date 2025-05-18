@@ -403,7 +403,7 @@ class UnicommerceAPIClient:
 			}
 		}
 		response, status = self.request(
-			endpoint="/services/rest/v1/oms/purchaseOrder/search",
+			endpoint="/services/rest/v1/purchase/purchaseOrder/getPurchaseOrders",
 			headers=headers,
 			body=body,
 		)
@@ -422,7 +422,7 @@ class UnicommerceAPIClient:
 		body = {"code": po_code}
 
 		response, status = self.request(
-			endpoint="/services/rest/v1/oms/purchaseOrder/get",
+			endpoint="/services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails",
 			headers=headers,
 			body=body
 		)
