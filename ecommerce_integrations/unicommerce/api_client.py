@@ -419,7 +419,7 @@ class UnicommerceAPIClient:
 		Ref: https://documentation.unicommerce.com/docs/get_purchase_order_details.html
 		"""
 		headers = {"Facility": facility_code}
-		body = {"code": po_code}
+		body = {"purchaseOrderCode": po_code}
 
 		response, status = self.request(
 			endpoint="/services/rest/v1/purchase/purchaseOrder/getPurchaseOrderDetails",
