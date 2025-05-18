@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import now_datetime, nowdate
+from frappe.utils import now_datetime, nowdate, get_datetime
 from ecommerce_integrations.unicommerce.api_client import UnicommerceAPIClient
 from ecommerce_integrations.unicommerce.constants import SETTINGS_DOCTYPE
 
@@ -15,11 +15,16 @@ def sync_purchase_orders():
 		facility_code = mapping.unicommerce_facility_code
 		target_warehouse = mapping.erpnext_warehouse
 		last_sync = mapping.get("last_po_sync_at") or "2024-01-01 00:00:00"
-		updated_since = _minutes_since(last_sync)
 
-		# Fetch PO codes
+		# ⏰ Get datetime window
+		start = get_datetime(last_sync)
+		end = now_datetime()
+
+		# 🔍 Search Purchase Orders
 		po_codes = client.search_purchase_orders(
-			facility_code=facility_code, updated_since=updated_since
+			facility_code=facility_code,
+			start_datetime=start,
+			end_datetime=end
 		)
 
 		if not po_codes:
@@ -36,19 +41,13 @@ def sync_purchase_orders():
 			except Exception:
 				frappe.log_error(frappe.get_traceback(), f"❌ Failed to create Material Request for PO {po_code}")
 
-		# ✅ Update last sync time
+		# ✅ Update last sync timestamp
 		frappe.db.set_value(
 			"Unicommerce Warehouses",
 			mapping.name,
 			"last_po_sync_at",
-			now_datetime()
+			end
 		)
-
-
-def _minutes_since(last_sync_time):
-	from frappe.utils import get_datetime
-	diff = now_datetime() - get_datetime(last_sync_time)
-	return int(diff.total_seconds() / 60)
 
 
 def create_material_request(po_data, target_warehouse, facility_code):
@@ -62,10 +61,7 @@ def create_material_request(po_data, target_warehouse, facility_code):
 	mr.set_from_warehouse = settings.default_source_warehouse
 	mr.transaction_date = nowdate()
 	mr.schedule_date = nowdate()
-
-	# Optional: store PO code in custom field
-	if frappe.get_meta("Material Request").has_field("custom_unicommerce_po_code"):
-		mr.custom_unicommerce_po_code = po_data.get("code")
+	mr.custom_unicommerce_purchase_order = po_data.get("code")
 
 	for item in po_data.get("purchaseOrderItems", []):
 		mr.append("items", {
@@ -78,5 +74,4 @@ def create_material_request(po_data, target_warehouse, facility_code):
 
 	mr.insert(ignore_permissions=True)
 
-	# Add metadata as a comment
 	mr.add_comment("Comment", f"📦 PO Code: {po_data.get('code')}, Vendor: {po_data.get('vendorName')}, Facility: {facility_code}, Created By: {po_data.get('createdBy')}")
