@@ -80,3 +80,44 @@ def create_material_request(po_data, target_warehouse, facility_code):
 		f"📦 PO Code: {po_data.get('code')}, Vendor: {po_data.get('vendorName')}, "
 		f"Facility: {facility_code}, Created By: {po_data.get('createdBy')}"
 	)
+
+
+@frappe.whitelist()
+def map_mr_to_dn(source_name, target_doc=None):
+	from frappe.model.mapper import get_mapped_doc
+	from ecommerce_integrations.unicommerce.constants import SETTINGS_DOCTYPE
+
+	def set_missing_values(source, target):
+		settings = frappe.get_cached_doc(SETTINGS_DOCTYPE)
+
+		target.custom_reference_no = source.custom_unicommerce_purchase_order
+		target.set_from_warehouse = source.set_from_warehouse
+		target.set_warehouse = settings.default_in_transit_warehouse
+		target.customer = frappe.db.get_single_value("Selling Settings", "customer")
+		target.company = source.company
+
+	return get_mapped_doc(
+		"Material Request",
+		source_name,
+		{
+			"Material Request": {
+				"doctype": "Delivery Note",
+				"field_map": {
+					"transaction_date": "posting_date",
+				},
+				"validation": {
+					"docstatus": ["=", 1]
+				}
+			},
+			"Material Request Item": {
+				"doctype": "Delivery Note Item",
+				"field_map": {
+					"name": "material_request_item",
+					"parent": "material_request"
+				},
+				"add_if_empty": True
+			}
+		},
+		target_doc,
+		set_missing_values
+	)
