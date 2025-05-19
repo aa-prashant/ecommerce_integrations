@@ -92,8 +92,8 @@ def map_mr_to_dn(source_name, target_doc=None):
 
 		target.custom_reference_no = source.custom_unicommerce_purchase_order
 		target.set_from_warehouse = source.set_from_warehouse
-		target.set_warehouse = settings.default_in_transit_warehouse
-		target.customer = frappe.db.get_single_value("Selling Settings", "customer")
+		# target.set_warehouse = settings.default_in_transit_warehouse
+		# target.customer = frappe.db.get_single_value("Selling Settings", "customer")
 		target.company = source.company
 
 	return get_mapped_doc(
